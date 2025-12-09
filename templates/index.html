@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeFiles - Управление файлами</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <script>
+        // Устанавливаем режим административного интерфейса
+        window.PUBLIC_MODE = false;
+    </script>
+</head>
+<body class="dark-theme mat-app-background">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-container">
+            <h1 class="app-title">
+                <span class="material-icons">folder_shared</span>
+                HomeFiles
+            </h1>
+            <div class="header-actions">
+                <button class="btn btn-primary" onclick="showAddFileDialog()">
+                    <span class="material-icons">add</span>
+                    Добавить файл
+                </button>
+                <button class="btn btn-secondary" onclick="refreshFiles()">
+                    <span class="material-icons">refresh</span>
+                    Обновить
+                </button>
+                <button class="btn btn-danger" onclick="shutdownServer()" title="Завершить работу сервера">
+                    <span class="material-icons">power_settings_new</span>
+                    Завершить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="content-container">
+            <!-- Files Section -->
+            <div class="files-section">
+                <div class="section-header">
+                    <h2 class="section-title">
+                        <span class="material-icons">folder</span>
+                        Общие файлы и папки
+                    </h2>
+                    <div class="section-actions">
+                        <button class="btn btn-outline" onclick="showUploadDialog()">
+                            <span class="material-icons">cloud_upload</span>
+                            Загрузить файл
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Files Grid -->
+                <div class="files-grid" id="filesGrid">
+                    <div class="loading-spinner">
+                        <div class="spinner"></div>
+                        <p>Загрузка файлов...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add File Dialog -->
+    <div class="dialog-overlay" id="addFileDialog" style="display: none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Добавить файл в общий доступ</h3>
+                <button class="dialog-close" onclick="closeDialog('addFileDialog')">
+                    <span class="material-icons">close</span>
+                </button>
+            </div>
+            <div class="dialog-content">
+                <div class="form-group">
+                    <label for="filePath">Путь к файлу или папке:</label>
+                    <div class="input-group">
+                        <input type="text" id="filePath" placeholder="Например: C:\Documents\report.pdf или C:\Photos" class="form-input">
+                        <button class="btn btn-outline" onclick="browseFile()">
+                            <span class="material-icons">folder_open</span>
+                            Обзор
+                        </button>
+                    </div>
+                </div>
+                <div class="form-help">
+                    <p>Введите полный путь к файлу или папке, которые нужно сделать доступными для других пользователей.</p>
+                </div>
+            </div>
+            <div class="dialog-actions">
+                <button class="btn btn-secondary" onclick="closeDialog('addFileDialog')">Отмена</button>
+                <button class="btn btn-primary" onclick="addFile()">Добавить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Dialog -->
+    <div class="dialog-overlay" id="uploadDialog" style="display: none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <h3 class="dialog-title">Загрузить файл</h3>
+                <button class="dialog-close" onclick="closeDialog('uploadDialog')">
+                    <span class="material-icons">close</span>
+                </button>
+            </div>
+            <div class="dialog-content">
+                <div class="upload-area" id="uploadArea">
+                    <span class="material-icons upload-icon">cloud_upload</span>
+                    <p>Перетащите файл сюда или нажмите для выбора</p>
+                    <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(event)">
+                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                        Выбрать файл
+                    </button>
+                </div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="uploadStatus">Загрузка...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
