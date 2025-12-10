@@ -4,7 +4,7 @@
     /* Color Palette */
     --primary-color: #0074d4;
     --primary-variant: #00569c;
-    --secondary-color: #03dac6;
+    --secondary-color: #e79600;
     --background-color: #121212;
     --surface-color: #1e1e1e;
     --surface-variant: #2c2c2c;
@@ -77,7 +77,6 @@ body {
 }
 
 .header-container {
-    max-width: 1200px;
     margin: 0 auto;
     padding: 0 var(--spacing-lg);
     display: flex;
@@ -825,4 +824,55 @@ body {
     .file-icon .material-icons {
         font-size: 0.875rem;
     }
+}
+
+/* Navigation Bar Styles */
+.navigation-bar {
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--surface-color);
+    border-bottom: 1px solid var(--surface-variant);
+    margin-bottom: var(--spacing-lg);
+    border-radius: var(--radius-md);
+}
+
+.nav-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    cursor: pointer;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.nav-link:hover {
+    color: var(--primary-variant);
+    text-decoration: underline;
+}
+
+.nav-current {
+    color: var(--on-surface);
+    font-weight: 500;
+}
+
+.nav-separator {
+    color: var(--on-surface-variant);
+    margin: 0 var(--spacing-xs);
+    user-select: none;
+}
+
+/* Back folder button styling */
+.file-row.back-folder {
+    background: var(--surface-variant);
+    border-left: 3px solid var(--primary-color);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.file-row.back-folder:hover {
+    background: var(--surface-color);
+    transform: translateX(2px);
+}
+
+.file-row.back-folder .file-name {
+    color: var(--primary-color);
+    font-weight: 600;
 }

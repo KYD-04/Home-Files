@@ -3,6 +3,7 @@
 // Global variables
 let files = [];
 let isLoading = false;
+let currentFolder = null; // ID текущей папки, null означает корневую папку
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -48,21 +49,18 @@ async function loadFiles() {
     try {
         const data = await apiRequest('/api/files');
         
-        // Сохраняем состояние раскрытых папок
-        const previouslyExpanded = new Set(expandedFolders);
-        
         files = data;
         
-        // Восстанавливаем состояние раскрытых папок для существующих папок
-        expandedFolders.clear();
-        files.forEach(file => {
-            if (file.type === 'folder' && previouslyExpanded.has(file.id)) {
-                expandedFolders.add(file.id);
+        // Если текущая папка не существует, возвращаемся к корню
+        if (currentFolder !== null) {
+            const currentFolderExists = findFileById(files, currentFolder);
+            if (!currentFolderExists) {
+                currentFolder = null;
             }
-        });
+        }
         
         console.log('Загружены файлы:', files.length);
-        console.log('Раскрытые папки:', Array.from(expandedFolders));
+        console.log('Текущая папка:', currentFolder);
         
         renderFiles();
         updateFilesCount();
@@ -129,8 +127,7 @@ function downloadFolder(fileId) {
     }
 }
 
-// Expanded folders state
-let expandedFolders = new Set();
+// Expanded folders state removed - replaced with folder navigation
 
 // File upload functionality
 function setupDragAndDrop() {
@@ -252,25 +249,62 @@ function renderFiles() {
         return;
     }
     
-    const tableRows = [];
+    // Определяем какие файлы показывать
+    let filesToShow = files;
     
-    // Функция для рекурсивного добавления строк файлов
-    function addFileRows(fileList, indentLevel = 0, isSubFile = false, parentFolderId = null) {
-        fileList.forEach(file => {
-            // Всегда показываем основной файл/папку
-            tableRows.push(createTableRow(file, indentLevel, isSubFile, parentFolderId));
-            
-            // Если папка раскрыта, показываем её содержимое
-            if (file.type === 'folder' && expandedFolders.has(file.id) && file.contents) {
-                addFileRows(file.contents, indentLevel + 1, true, file.id);
-            }
-        });
+    if (currentFolder !== null) {
+        // Ищем текущую папку и показываем её содержимое
+        const currentFolderData = findFileByIdRecursively(files, currentFolder);
+        if (currentFolderData && currentFolderData.type === 'folder') {
+            filesToShow = currentFolderData.contents || [];
+        } else {
+            // Если папка не найдена, возвращаемся к корню
+            console.warn('Папка не найдена, возвращаемся к корню:', currentFolder);
+            currentFolder = null;
+        }
     }
     
-    // Добавляем все файлы рекурсивно
-    addFileRows(files);
+    const tableRows = [];
+    
+    // Добавляем кнопку "Назад" если мы не в корневой папке
+    if (currentFolder !== null) {
+        const backButton = `
+            <tr class="file-row back-folder" onclick="goBack()">
+                <td class="name-cell">
+                    <div class="name-cell-content" style="padding-left: 12px;">
+                        <div class="file-icon folder">
+                            <span class="material-icons">arrow_back</span>
+                        </div>
+                        <div class="file-info">
+                            <div class="file-name">Назад</div>
+                            <div class="file-path">Вернуться к предыдущей папке</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="size-cell">-</td>
+                <td class="date-cell">-</td>
+                <td class="actions-cell">
+                    <div class="action-buttons">
+                        <button class="btn btn-outline" onclick="event.stopPropagation(); goBack()" title="Вернуться к предыдущей папке">
+                            <span class="material-icons">arrow_back</span>
+                            Назад
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+        tableRows.push(backButton);
+    }
+    
+    // Создаем строки для файлов и папок
+    filesToShow.forEach(file => {
+        tableRows.push(createTableRow(file, 0, false, currentFolder));
+    });
     
     filesTableBody.innerHTML = tableRows.join('');
+    
+    // Обновляем навигационную панель
+    updateNavigationBar();
 }
 
 function createTableRow(file, indentLevel = 0, isSubFile = false, parentFolderId = null) {
@@ -281,26 +315,11 @@ function createTableRow(file, indentLevel = 0, isSubFile = false, parentFolderId
     // Calculate indentation
     const paddingLeft = (indentLevel * 20) + 12;
     
-    // Определяем, можно ли раскрыть папку
-    // Для основных папок: если есть содержимое
-    // Для подпапок: всегда можно раскрыть (даже если содержимого пока нет)
-    const canExpand = file.type === 'folder';
-    
-    // Для основных папок проверяем наличие содержимого
-    let shouldShowExpandButton = canExpand;
-    if (!isSubFile && file.contents && file.contents.length === 0) {
-        shouldShowExpandButton = false;
-    }
-    
-    const isExpanded = shouldShowExpandButton && expandedFolders.has(file.id);
-    
-    // Создаем кнопку раскрытия/сворачивания для папок
-    const expandButton = shouldShowExpandButton ? `
-        <button class="expand-btn" onclick="toggleFolder('${file.id}')" title="${isExpanded ? 'Свернуть' : 'Развернуть'}">
-            <span class="material-icons">${isExpanded ? 'expand_more' : 'chevron_right'}</span>
+    // Для папок показываем кнопку "Открыть"
+    const openButton = file.type === 'folder' ? `
+        <button class="expand-btn" onclick="openFolder('${file.id}')" title="Открыть папку">
+            <span class="material-icons">folder_open</span>
         </button>
-    ` : file.type === 'folder' ? `
-        <div class="expand-btn-placeholder"></div>
     ` : '';
     
     // Download button based on file type
@@ -328,7 +347,7 @@ function createTableRow(file, indentLevel = 0, isSubFile = false, parentFolderId
         <tr class="file-row ${missingClass} ${indentClass}" data-file-id="${file.id}" data-parent-folder="${parentFolderId || ''}">
             <td class="name-cell">
                 <div class="name-cell-content" style="padding-left: ${paddingLeft}px;">
-                    ${expandButton}
+                    ${openButton}
                     <div class="file-icon ${iconClass}">
                         <span class="material-icons">${file.icon}</span>
                     </div>
@@ -354,44 +373,160 @@ function createTableRow(file, indentLevel = 0, isSubFile = false, parentFolderId
     `;
 }
 
-// Новая рекурсивная функция для поиска файла/папки
-function findFileOrFolder(idToFind, fileList) {
-    for (const file of fileList) {
-        if (file.id == idToFind && file.type === 'folder') {
-            return file; // Папка найдена
-        }
-        
-        if (file.type === 'folder' && file.contents && file.contents.length > 0) {
-            // Рекурсивный поиск в содержимом
-            const foundInContents = findFileOrFolder(idToFind, file.contents);
-            if (foundInContents) {
-                return foundInContents;
-            }
+function openFolder(folderId) {
+    // Ищем папку в текущем контексте
+    let searchContext = files;
+    
+    // Если мы уже находимся в какой-то папке, ищем в её содержимом
+    if (currentFolder !== null) {
+        const currentFolderData = findFileByIdRecursively(files, currentFolder);
+        if (currentFolderData && currentFolderData.type === 'folder') {
+            searchContext = currentFolderData.contents || [];
         }
     }
-    return null; // Папка не найдена
-}
-
-function toggleFolder(folderId) {
-    // Используем рекурсивную функцию для поиска папки
-    const folder = findFileOrFolder(folderId, files);
+    
+    // Ищем папку в нужном контексте
+    const folder = findFileInContext(searchContext, folderId);
     
     if (!folder) {
-        console.warn('Папка не найдена:', folderId);
-        // ... (можно оставить текущий вывод для отладки)
+        console.warn('Папка не найдена в текущем контексте:', folderId);
         return;
     }
     
-    console.log('Переключение папки:', folderId, folder.name);
-    
-    // Переключаем состояние раскрытия
-    if (expandedFolders.has(folderId)) {
-        expandedFolders.delete(folderId);
-        console.log('Папка свернута:', folderId);
-    } else {
-        expandedFolders.add(folderId);
-        console.log('Папка развернута:', folderId);
+    if (folder.type !== 'folder') {
+        console.warn('Элемент не является папкой:', folderId);
+        return;
     }
+    
+    console.log('Открытие папки:', folderId, folder.name);
+    
+    // Переходим в папку
+    currentFolder = folderId;
+    
+    // Перерисовываем таблицу
+    renderFiles();
+}
+
+function goBack() {
+    console.log('Возврат к предыдущей папке');
+    currentFolder = null;
+    renderFiles();
+}
+
+// Вспомогательная функция для поиска файла по ID в любой глубине
+function findFileById(fileList, targetId) {
+    for (const file of fileList) {
+        if (file.id == targetId) {
+            return file;
+        }
+        if (file.type === 'folder' && file.contents) {
+            const found = findFileById(file.contents, targetId);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return null;
+}
+
+// Вспомогательная функция для поиска файла по ID рекурсивно (альтернативное имя)
+function findFileByIdRecursively(fileList, targetId) {
+    return findFileById(fileList, targetId);
+}
+
+// Вспомогательная функция для поиска файла в конкретном контексте (без рекурсии)
+function findFileInContext(fileList, targetId) {
+    for (const file of fileList) {
+        if (file.id == targetId) {
+            return file;
+        }
+    }
+    return null;
+}
+
+// Функция для обновления навигационной панели
+function updateNavigationBar() {
+    const navigationBar = document.getElementById('navigationBar');
+    if (!navigationBar) return;
+    
+    // Создаем путь навигации
+    let path = [];
+    if (currentFolder !== null) {
+        // Собираем полный путь от корня до текущей папки
+        const folderPath = getFolderPath(files, currentFolder);
+        path = folderPath || [];
+    }
+    
+    // Создаем HTML для навигации
+    let navigationHTML = '';
+    
+    if (currentFolder === null) {
+        navigationHTML = '<span class="nav-current">Все файлы</span>';
+    } else {
+        navigationHTML = `
+            <span class="nav-link" onclick="goToRoot()">Все файлы</span>
+            <span class="nav-separator">›</span>
+        `;
+        
+        path.forEach((folder, index) => {
+            const isLast = index === path.length - 1;
+            if (isLast) {
+                navigationHTML += `<span class="nav-current">${escapeHtml(folder.name)}</span>`;
+            } else {
+                navigationHTML += `
+                    <span class="nav-link" onclick="openFolderFromBreadcrumb('${folder.id}')">${escapeHtml(folder.name)}</span>
+                    <span class="nav-separator">›</span>
+                `;
+            }
+        });
+    }
+    
+    navigationBar.innerHTML = navigationHTML;
+}
+
+// Вспомогательная функция для получения пути к папке
+function getFolderPath(fileList, targetId, currentPath = []) {
+    for (const file of fileList) {
+        const newPath = [...currentPath, {id: file.id, name: file.name}];
+        
+        if (file.id == targetId) {
+            return newPath;
+        }
+        
+        if (file.type === 'folder' && file.contents) {
+            const result = getFolderPath(file.contents, targetId, newPath);
+            if (result) {
+                return result;
+            }
+        }
+    }
+    return null;
+}
+
+function goToRoot() {
+    currentFolder = null;
+    renderFiles();
+}
+
+// Функция для открытия папки из навигационных ссылок (хлебные крошки)
+function openFolderFromBreadcrumb(folderId) {
+    // Проверяем, есть ли такая папка в системе
+    const folder = findFileById(files, folderId);
+    
+    if (!folder) {
+        console.warn('Папка не найдена при навигации из хлебных крошек:', folderId);
+        return;
+    }
+    
+    if (folder.type !== 'folder') {
+        console.warn('Элемент не является папкой при навигации из хлебных крошек:', folderId);
+        return;
+    }
+    
+    console.log('Навигация к папке из хлебных крошек:', folderId, folder.name);
+    
+    // Переходим в папку
+    currentFolder = folderId;
     
     // Перерисовываем таблицу
     renderFiles();
@@ -433,19 +568,22 @@ function hideLoading() {
 }
 
 function updateFilesCount() {
-    // Подсчитываем основные файлы и файлы в раскрытых папках
+    // Подсчитываем файлы в текущей папке или в корне
     let totalFiles = 0;
+    let filesToCount = files;
     
-    files.forEach(file => {
-        if (file.exists) {
-            if (file.type === 'folder') {
-                // Для папки считаем файлы в содержимом если папка раскрыта
-                if (expandedFolders.has(file.id) && file.contents) {
-                    totalFiles += file.contents.filter(subFile => subFile.type === 'file').length;
-                }
-            } else {
-                totalFiles++;
-            }
+    if (currentFolder !== null) {
+        const currentFolderData = findFileByIdRecursively(files, currentFolder);
+        if (currentFolderData && currentFolderData.type === 'folder') {
+            filesToCount = currentFolderData.contents || [];
+        } else {
+            console.warn('Не удалось найти текущую папку для подсчета файлов:', currentFolder);
+        }
+    }
+    
+    filesToCount.forEach(file => {
+        if (file.exists && file.type === 'file') {
+            totalFiles++;
         }
     });
     
@@ -646,30 +784,33 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Функция для отладки - очистка состояния раскрытых папок
-function clearExpandedFolders() {
-    expandedFolders.clear();
-    renderFiles();
-    console.log('Состояние раскрытых папок очищено');
-}
-
-// Функция для отладки - показать состояние раскрытых папок
-function showExpandedFoldersState() {
-    console.log('Текущее состояние раскрытых папок:', Array.from(expandedFolders));
+// Функция для отладки - показать состояние текущей папки
+function showCurrentFolderState() {
+    console.log('Текущая папка:', currentFolder);
     console.log('Основные папки:', files.filter(f => f.type === 'folder'));
     
-    // Показываем содержимое всех папок
-    files.forEach(file => {
-        if (file.type === 'folder') {
-            console.log(`Папка "${file.name}" (ID: ${file.id}) содержит:`, file.contents || []);
+    // Показываем содержимое текущей папки
+    if (currentFolder !== null) {
+        const currentFolderData = findFileByIdRecursively(files, currentFolder);
+        console.log('Содержимое текущей папки:', currentFolderData ? currentFolderData.contents : 'Папка не найдена');
+        
+        // Показываем информацию о найденной папке
+        if (currentFolderData) {
+            console.log('Информация о папке:', {
+                id: currentFolderData.id,
+                name: currentFolderData.name,
+                type: currentFolderData.type,
+                contentsCount: currentFolderData.contents ? currentFolderData.contents.length : 0
+            });
         }
-    });
+    } else {
+        console.log('Содержимое корневой папки:', files);
+    }
 }
 
 // Добавляем глобальные функции для отладки (только в режиме разработки)
 if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    window.clearExpandedFolders = clearExpandedFolders;
-    window.showExpandedFoldersState = showExpandedFoldersState;
+    window.showCurrentFolderState = showCurrentFolderState;
 }
 
 // Функция завершения работы сервера
