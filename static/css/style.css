@@ -2,8 +2,8 @@
 
 :root {
     /* Color Palette */
-    --primary-color: #6200ee;
-    --primary-variant: #3700b3;
+    --primary-color: #0074d4;
+    --primary-variant: #00569c;
     --secondary-color: #03dac6;
     --background-color: #121212;
     --surface-color: #1e1e1e;
@@ -187,7 +187,7 @@ body {
 }
 
 .btn-danger {
-    background-color: #dc3545;
+    background-color: #7c151f;
     color: white;
 }
 

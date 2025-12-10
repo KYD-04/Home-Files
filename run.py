@@ -218,18 +218,31 @@ def download_folder(file_id):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_zip:
                     temp_zip_name = temp_zip.name
                 
-                try:
-                    create_zip_from_folder(folder_path, temp_zip_name)
-                    return send_file(
-                        temp_zip_name,
-                        as_attachment=True,
-                        download_name=zip_filename,
-                        mimetype='application/zip'
-                    )
-                finally:
-                    # Удаляем временный файл после отправки
-                    if os.path.exists(temp_zip_name):
-                        os.unlink(temp_zip_name)
+                create_zip_from_folder(folder_path, temp_zip_name)
+                
+                # Функция для удаления временного файла после отправки
+                def cleanup_temp_file(response):
+                    try:
+                        if os.path.exists(temp_zip_name):
+                            os.unlink(temp_zip_name)
+                    except Exception as e:
+                        # Логируем ошибку, но не прерываем выполнение
+                        print(f"Ошибка при удалении временного файла {temp_zip_name}: {e}")
+                    return response
+                
+                # Удаляем файл после отправки ответа
+                from flask import after_this_request
+                @after_this_request
+                def remove_temp_file(response):
+                    cleanup_temp_file(response)
+                    return response
+                
+                return send_file(
+                    temp_zip_name,
+                    as_attachment=True,
+                    download_name=zip_filename,
+                    mimetype='application/zip'
+                )
     
     return jsonify({'error': 'Папка не найдена или не существует'}), 404
 
