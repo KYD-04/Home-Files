@@ -9,7 +9,7 @@ import json
 import zipfile
 import tempfile
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, after_this_request
 from werkzeug.utils import secure_filename
 import yaml
 from datetime import datetime
@@ -60,6 +60,24 @@ def save_shared_files(files_list):
     with open(SHARED_FILES_FILE, 'w', encoding='utf-8') as f:
         json.dump(files_list, f, indent=2, ensure_ascii=False)
 
+# Функция для подсчета размера папки
+def get_folder_size(folder_path):
+    """Рекурсивно подсчитывает размер папки в байтах"""
+    total_size = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(folder_path):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                try:
+                    total_size += os.path.getsize(filepath)
+                except (OSError, FileNotFoundError):
+                    # Пропускаем файлы, к которым нет доступа
+                    continue
+    except (OSError, PermissionError):
+        # Если нет доступа к папке, возвращаем 0
+        return 0
+    return total_size
+
 # Получение иконки для типа файла
 def get_file_icon(filename):
     ext = Path(filename).suffix.lower()
@@ -109,6 +127,53 @@ def index():
     shared_files = load_shared_files()
     return render_template('index.html', files=shared_files, config=config)
 
+# Функция для получения содержимого папки
+def get_folder_contents(folder_path, parent_id=None):
+    """Получает содержимое папки и возвращает список файлов"""
+    contents = []
+    try:
+        for item in os.listdir(folder_path):
+            item_path = os.path.join(folder_path, item)
+            try:
+                is_dir = os.path.isdir(item_path)
+                
+                file_info = {
+                    'id': f"{parent_id}_{len(contents)}",  # Уникальный ID для подфайлов
+                    'name': item,
+                    'path': item_path,
+                    'type': 'folder' if is_dir else 'file',
+                    'icon': get_file_icon(item) if not is_dir else 'folder',
+                    'modified': datetime.fromtimestamp(os.path.getmtime(item_path)).strftime('%Y-%m-%d %H:%M'),
+                    'exists': True,
+                    'parent_id': parent_id
+                }
+                
+                if is_dir:
+                    file_info['size'] = get_folder_size(item_path)
+                    # Получаем количество файлов в папке
+                    try:
+                        file_count = sum([len(files) for r, d, files in os.walk(item_path)])
+                        file_info['file_count'] = file_count
+                    except:
+                        file_info['file_count'] = 0
+                else:
+                    file_info['size'] = os.path.getsize(item_path)
+                
+                contents.append(file_info)
+                
+            except (OSError, PermissionError):
+                # Пропускаем файлы, к которым нет доступа
+                continue
+                
+    except (OSError, PermissionError):
+        # Если нет доступа к папке, возвращаем пустой список
+        pass
+    
+    # Сортируем: папки сначала, потом файлы, по имени
+    contents.sort(key=lambda x: (x['type'] == 'file', x['name'].lower()))
+    
+    return contents
+
 # API для получения списка файлов
 @app.route('/api/files')
 def get_files():
@@ -120,11 +185,19 @@ def get_files():
         path = file_info.get('path')
         if path and file_exists(path):
             file_info['exists'] = True
-            file_info['size'] = os.path.getsize(path)
             file_info['icon'] = get_file_icon(file_info['name'])
             file_info['modified'] = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d %H:%M')
             # Проверяем, является ли путь папкой
             file_info['type'] = 'folder' if os.path.isdir(path) else 'file'
+            
+            # Вычисляем размер: для файлов - обычный размер, для папок - рекурсивный подсчет
+            if os.path.isdir(path):
+                file_info['size'] = get_folder_size(path)
+                # Получаем содержимое папки
+                file_info['contents'] = get_folder_contents(path, file_info['id'])
+                file_info['has_contents'] = len(file_info['contents']) > 0
+            else:
+                file_info['size'] = os.path.getsize(path)
         else:
             file_info['exists'] = False
         updated_files.append(file_info)
@@ -133,6 +206,34 @@ def get_files():
     save_shared_files(updated_files)
     
     return jsonify(updated_files)
+
+# API для получения содержимого конкретной папки
+@app.route('/api/folder-contents/<int:folder_id>')
+def get_folder_contents_api(folder_id):
+    shared_files = load_shared_files()
+    
+    # Находим папку по ID
+    folder_info = None
+    for file_info in shared_files:
+        if file_info['id'] == folder_id and file_info.get('exists'):
+            folder_info = file_info
+            break
+    
+    if not folder_info or folder_info.get('type') != 'folder':
+        return jsonify({'error': 'Папка не найдена'}), 404
+    
+    folder_path = folder_info['path']
+    if not os.path.isdir(folder_path):
+        return jsonify({'error': 'Папка не существует'}), 404
+    
+    # Получаем содержимое папки
+    contents = get_folder_contents(folder_path, folder_id)
+    
+    return jsonify({
+        'folder_id': folder_id,
+        'folder_name': folder_info['name'],
+        'contents': contents
+    })
 
 # API для добавления файла в общий доступ
 @app.route('/api/add-file', methods=['POST'])
@@ -195,15 +296,25 @@ def remove_file(file_id):
 def download_file(file_id):
     shared_files = load_shared_files()
     
+    # Проверяем основные файлы
     for file_info in shared_files:
         if file_info['id'] == file_id and file_info.get('exists'):
             file_path = file_info['path']
             if file_exists(file_path) and file_info.get('type') == 'file':
                 return send_file(file_path, as_attachment=True, download_name=file_info['name'])
     
+    # Проверяем файлы в раскрытых папках
+    for file_info in shared_files:
+        if file_info.get('type') == 'folder' and file_info.get('contents'):
+            for sub_file in file_info['contents']:
+                if sub_file['id'] == str(file_id) and sub_file.get('type') == 'file':
+                    file_path = sub_file['path']
+                    if file_exists(file_path):
+                        return send_file(file_path, as_attachment=True, download_name=sub_file['name'])
+    
     return jsonify({'error': 'Файл не найден или является папкой'}), 404
 
-# Скачивание папки как ZIP
+# Скачивание папки как ZIP (ИСПРАВЛЕНО)
 @app.route('/download-folder/<int:file_id>')
 def download_folder(file_id):
     shared_files = load_shared_files()
@@ -231,7 +342,6 @@ def download_folder(file_id):
                     return response
                 
                 # Удаляем файл после отправки ответа
-                from flask import after_this_request
                 @after_this_request
                 def remove_temp_file(response):
                     cleanup_temp_file(response)
@@ -377,6 +487,11 @@ if __name__ == '__main__':
         @public_app.route('/download-folder/<int:file_id>')
         def public_download_folder(file_id):
             return download_folder(file_id)
+        
+        # Public Folder Contents
+        @public_app.route('/api/folder-contents/<int:folder_id>')
+        def public_folder_contents(folder_id):
+            return get_folder_contents_api(folder_id)
         
         # Public Upload
         @public_app.route('/upload', methods=['POST'])

@@ -13,10 +13,7 @@ function initializeApp() {
     setupDragAndDrop();
     loadFiles();
     
-    // Auto-refresh every 30 seconds
-    if (!window.PUBLIC_MODE) {
-        setInterval(loadFiles, 30000);
-    }
+    // Auto-refresh removed - files update only on page load or manual refresh
 }
 
 // API functions
@@ -50,7 +47,23 @@ async function loadFiles() {
     
     try {
         const data = await apiRequest('/api/files');
+        
+        // Сохраняем состояние раскрытых папок
+        const previouslyExpanded = new Set(expandedFolders);
+        
         files = data;
+        
+        // Восстанавливаем состояние раскрытых папок для существующих папок
+        expandedFolders.clear();
+        files.forEach(file => {
+            if (file.type === 'folder' && previouslyExpanded.has(file.id)) {
+                expandedFolders.add(file.id);
+            }
+        });
+        
+        console.log('Загружены файлы:', files.length);
+        console.log('Раскрытые папки:', Array.from(expandedFolders));
+        
         renderFiles();
         updateFilesCount();
     } catch (error) {
@@ -103,11 +116,9 @@ async function removeFile(fileId) {
 }
 
 function downloadFile(fileId) {
-    if (window.PUBLIC_MODE) {
-        window.open(`/download/${fileId}`, '_blank');
-    } else {
-        window.open(`/download/${fileId}`, '_blank');
-    }
+    // fileId может быть числом (основные файлы) или строкой (файлы в папках)
+    const url = `/download/${fileId}`;
+    window.open(url, '_blank');
 }
 
 function downloadFolder(fileId) {
@@ -117,6 +128,9 @@ function downloadFolder(fileId) {
         window.open(`/download-folder/${fileId}`, '_blank');
     }
 }
+
+// Expanded folders state
+let expandedFolders = new Set();
 
 // File upload functionality
 function setupDragAndDrop() {
@@ -231,79 +245,186 @@ function resetUploadForm() {
 
 // UI Functions
 function renderFiles() {
-    const filesGrid = document.getElementById('filesGrid');
+    const filesTableBody = document.getElementById('filesTableBody');
     
     if (!files || files.length === 0) {
         renderEmptyState();
         return;
     }
     
-    filesGrid.innerHTML = files.map(file => createFileCard(file)).join('');
+    const tableRows = [];
+    
+    // Функция для рекурсивного добавления строк файлов
+    function addFileRows(fileList, indentLevel = 0, isSubFile = false, parentFolderId = null) {
+        fileList.forEach(file => {
+            // Всегда показываем основной файл/папку
+            tableRows.push(createTableRow(file, indentLevel, isSubFile, parentFolderId));
+            
+            // Если папка раскрыта, показываем её содержимое
+            if (file.type === 'folder' && expandedFolders.has(file.id) && file.contents) {
+                addFileRows(file.contents, indentLevel + 1, true, file.id);
+            }
+        });
+    }
+    
+    // Добавляем все файлы рекурсивно
+    addFileRows(files);
+    
+    filesTableBody.innerHTML = tableRows.join('');
 }
 
-function createFileCard(file) {
+function createTableRow(file, indentLevel = 0, isSubFile = false, parentFolderId = null) {
     const iconClass = file.type === 'folder' ? 'folder' : '';
     const missingClass = !file.exists ? 'missing' : '';
+    const indentClass = isSubFile ? 'sub-file' : '';
+    
+    // Calculate indentation
+    const paddingLeft = (indentLevel * 20) + 12;
+    
+    // Определяем, можно ли раскрыть папку
+    // Для основных папок: если есть содержимое
+    // Для подпапок: всегда можно раскрыть (даже если содержимого пока нет)
+    const canExpand = file.type === 'folder';
+    
+    // Для основных папок проверяем наличие содержимого
+    let shouldShowExpandButton = canExpand;
+    if (!isSubFile && file.contents && file.contents.length === 0) {
+        shouldShowExpandButton = false;
+    }
+    
+    const isExpanded = shouldShowExpandButton && expandedFolders.has(file.id);
+    
+    // Создаем кнопку раскрытия/сворачивания для папок
+    const expandButton = shouldShowExpandButton ? `
+        <button class="expand-btn" onclick="toggleFolder('${file.id}')" title="${isExpanded ? 'Свернуть' : 'Развернуть'}">
+            <span class="material-icons">${isExpanded ? 'expand_more' : 'chevron_right'}</span>
+        </button>
+    ` : file.type === 'folder' ? `
+        <div class="expand-btn-placeholder"></div>
+    ` : '';
+    
+    // Download button based on file type
+    const downloadButton = file.type === 'folder' ? `
+        <button class="btn btn-primary" onclick="downloadFolder('${file.id}')" title="Скачать как ZIP">
+            <span class="material-icons">archive</span>
+            Скачать
+        </button>
+    ` : `
+        <button class="btn btn-primary" onclick="downloadFile('${file.id}')" title="Скачать файл">
+            <span class="material-icons">download</span>
+            Скачать
+        </button>
+    `;
+    
+    // Remove button for admin mode
+    const removeButton = window.PUBLIC_MODE ? '' : `
+        <button class="btn btn-outline" onclick="removeFile('${file.id}')" title="Удалить из общего доступа">
+            <span class="material-icons">delete</span>
+            Удалить
+        </button>
+    `;
     
     return `
-        <div class="file-item ${missingClass}" data-file-id="${file.id}">
-            <div class="file-header">
-                <div class="file-icon ${iconClass}">
-                    <span class="material-icons">${file.icon}</span>
-                </div>
-                <div class="file-info">
-                    <div class="file-name">${escapeHtml(file.name)}</div>
-                    <div class="file-meta">
-                        <span>Добавлен: ${formatDate(file.added_date)}</span>
-                        ${file.modified ? `<span>Изменен: ${file.modified}</span>` : ''}
-                        ${file.size ? `<span>Размер: ${formatFileSize(file.size)}</span>` : ''}
-                        <span class="file-path">${escapeHtml(file.path)}</span>
+        <tr class="file-row ${missingClass} ${indentClass}" data-file-id="${file.id}" data-parent-folder="${parentFolderId || ''}">
+            <td class="name-cell">
+                <div class="name-cell-content" style="padding-left: ${paddingLeft}px;">
+                    ${expandButton}
+                    <div class="file-icon ${iconClass}">
+                        <span class="material-icons">${file.icon}</span>
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name">${escapeHtml(file.name)}</div>
+                        <div class="file-path">${escapeHtml(file.path)}</div>
                     </div>
                 </div>
-            </div>
-            <div class="file-actions">
-                ${window.PUBLIC_MODE ? '' : `
-                    <button class="btn btn-outline" onclick="removeFile(${file.id})" title="Удалить из общего доступа">
-                        <span class="material-icons">delete</span>
-                        Удалить
-                    </button>
-                `}
-                ${file.type === 'folder' ? `
-                    <button class="btn btn-primary" onclick="downloadFolder(${file.id})" title="Скачать как ZIP">
-                        <span class="material-icons">archive</span>
-                        Скачать ZIP
-                    </button>
-                ` : `
-                    <button class="btn btn-primary" onclick="downloadFile(${file.id})" title="Скачать файл">
-                        <span class="material-icons">download</span>
-                        Скачать
-                    </button>
-                `}
-            </div>
-        </div>
+            </td>
+            <td class="size-cell">
+                ${file.size ? formatFileSize(file.size) : '-'}
+            </td>
+            <td class="date-cell">
+                ${file.modified ? file.modified : formatDate(file.added_date)}
+            </td>
+            <td class="actions-cell">
+                <div class="action-buttons">
+                    ${removeButton}
+                    ${downloadButton}
+                </div>
+            </td>
+        </tr>
     `;
 }
 
-function renderEmptyState() {
-    const filesGrid = document.getElementById('filesGrid');
+// Новая рекурсивная функция для поиска файла/папки
+function findFileOrFolder(idToFind, fileList) {
+    for (const file of fileList) {
+        if (file.id == idToFind && file.type === 'folder') {
+            return file; // Папка найдена
+        }
+        
+        if (file.type === 'folder' && file.contents && file.contents.length > 0) {
+            // Рекурсивный поиск в содержимом
+            const foundInContents = findFileOrFolder(idToFind, file.contents);
+            if (foundInContents) {
+                return foundInContents;
+            }
+        }
+    }
+    return null; // Папка не найдена
+}
+
+function toggleFolder(folderId) {
+    // Используем рекурсивную функцию для поиска папки
+    const folder = findFileOrFolder(folderId, files);
     
-    filesGrid.innerHTML = `
-        <div class="empty-state">
-            <span class="material-icons">folder_open</span>
-            <h3>Нет доступных файлов</h3>
-            <p>Добавьте файлы или папки для совместного использования</p>
-            ${!window.PUBLIC_MODE ? '<button class="btn btn-primary" onclick="showAddFileDialog()">Добавить первый файл</button>' : ''}
-        </div>
+    if (!folder) {
+        console.warn('Папка не найдена:', folderId);
+        // ... (можно оставить текущий вывод для отладки)
+        return;
+    }
+    
+    console.log('Переключение папки:', folderId, folder.name);
+    
+    // Переключаем состояние раскрытия
+    if (expandedFolders.has(folderId)) {
+        expandedFolders.delete(folderId);
+        console.log('Папка свернута:', folderId);
+    } else {
+        expandedFolders.add(folderId);
+        console.log('Папка развернута:', folderId);
+    }
+    
+    // Перерисовываем таблицу
+    renderFiles();
+}
+
+function renderEmptyState() {
+    const filesTableBody = document.getElementById('filesTableBody');
+    
+    filesTableBody.innerHTML = `
+        <tr>
+            <td colspan="4" class="empty-state">
+                <div class="empty-state-content">
+                    <span class="material-icons">folder_open</span>
+                    <h3>Нет доступных файлов</h3>
+                    <p>Добавьте файлы или папки для совместного использования</p>
+                    ${!window.PUBLIC_MODE ? '<button class="btn btn-primary" onclick="showAddFileDialog()">Добавить первый файл</button>' : ''}
+                </div>
+            </td>
+        </tr>
     `;
 }
 
 function showLoading() {
-    const filesGrid = document.getElementById('filesGrid');
-    filesGrid.innerHTML = `
-        <div class="loading-spinner">
-            <div class="spinner"></div>
-            <p>Загрузка файлов...</p>
-        </div>
+    const filesTableBody = document.getElementById('filesTableBody');
+    filesTableBody.innerHTML = `
+        <tr>
+            <td colspan="4" class="loading-cell">
+                <div class="loading-spinner">
+                    <div class="spinner"></div>
+                    <p>Загрузка файлов...</p>
+                </div>
+            </td>
+        </tr>
     `;
 }
 
@@ -312,11 +433,29 @@ function hideLoading() {
 }
 
 function updateFilesCount() {
+    // Подсчитываем основные файлы и файлы в раскрытых папках
+    let totalFiles = 0;
+    
+    files.forEach(file => {
+        if (file.exists) {
+            if (file.type === 'folder') {
+                // Для папки считаем файлы в содержимом если папка раскрыта
+                if (expandedFolders.has(file.id) && file.contents) {
+                    totalFiles += file.contents.filter(subFile => subFile.type === 'file').length;
+                }
+            } else {
+                totalFiles++;
+            }
+        }
+    });
+    
+    // Обновляем отображение счетчика если элемент существует
     const filesCountElement = document.getElementById('filesCount');
-    if (filesCountElement && files) {
-        const count = files.filter(f => f.exists).length;
-        filesCountElement.textContent = `${count} файл${getRussianPlural(count, ['ов', '', 'а'])}`;
+    if (filesCountElement) {
+        filesCountElement.textContent = `${totalFiles} файл${getRussianPlural(totalFiles, ['ов', '', 'а'])}`;
     }
+    
+    return totalFiles;
 }
 
 function getRussianPlural(number, forms) {
@@ -506,6 +645,32 @@ document.addEventListener('DOMContentLoaded', function() {
         addFileDialog.addEventListener('show', setupFilePathInput);
     }
 });
+
+// Функция для отладки - очистка состояния раскрытых папок
+function clearExpandedFolders() {
+    expandedFolders.clear();
+    renderFiles();
+    console.log('Состояние раскрытых папок очищено');
+}
+
+// Функция для отладки - показать состояние раскрытых папок
+function showExpandedFoldersState() {
+    console.log('Текущее состояние раскрытых папок:', Array.from(expandedFolders));
+    console.log('Основные папки:', files.filter(f => f.type === 'folder'));
+    
+    // Показываем содержимое всех папок
+    files.forEach(file => {
+        if (file.type === 'folder') {
+            console.log(`Папка "${file.name}" (ID: ${file.id}) содержит:`, file.contents || []);
+        }
+    });
+}
+
+// Добавляем глобальные функции для отладки (только в режиме разработки)
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    window.clearExpandedFolders = clearExpandedFolders;
+    window.showExpandedFoldersState = showExpandedFoldersState;
+}
 
 // Функция завершения работы сервера
 async function shutdownServer() {

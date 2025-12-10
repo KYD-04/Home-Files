@@ -48,11 +48,29 @@
                     </div>
                 </div>
 
-                <!-- Files Grid -->
-                <div class="files-grid" id="filesGrid">
-                    <div class="loading-spinner">
-                        <div class="spinner"></div>
-                        <p>Загрузка файлов...</p>
+                <!-- Files Table View -->
+                <div class="files-container">
+                    <div class="table-container">
+                        <table class="files-table" id="filesTable">
+                            <thead>
+                                <tr>
+                                    <th class="name-column">Название</th>
+                                    <th class="size-column">Размер</th>
+                                    <th class="date-column">Изменён</th>
+                                    <th class="actions-column">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="filesTableBody">
+                                <tr>
+                                    <td colspan="4" class="loading-cell">
+                                        <div class="loading-spinner">
+                                            <div class="spinner"></div>
+                                            <p>Загрузка файлов...</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
